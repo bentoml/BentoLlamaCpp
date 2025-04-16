@@ -63,7 +63,7 @@ class LlamaCpp:
   async def chat_completions(
     self,
     messages: list[Message] = pydantic.Field(
-      default=[{'role': 'user', 'content': 'Who are you? Please respond in priate speak!'}]
+      default=[{'role': 'user', 'content': 'Who are you? Please respond in pirate speak!'}]
     ),
     functions: list[ChatCompletionFunction] | None = None,
     model: str = bento_args.model_id,
@@ -74,7 +74,7 @@ class LlamaCpp:
     top_p: float | None = 1.0,
     frequency_penalty: float | None = 0.0,
   ):
-    response = self.llm.create_chat_completion(
+    response = self.llm.create_chat_completion_openai_v1(
       model=model,
       messages=messages,
       max_tokens=max_tokens,
@@ -85,16 +85,18 @@ class LlamaCpp:
       frequency_penalty=frequency_penalty,
     )
     if stream:
+
       def streaming_response():
         for chunk in response:
           try:
-            yield f'data: {json.dumps(chunk)}\n\n'
+            yield f'data: {chunk.model_dump_json()}\n\n'
           except Exception:
             traceback.print_exc()
             yield 'data: Internal error. Check server logs\n\n'
             yield 'data: [DONE]\n\n'
             return
         yield 'data: [DONE]\n\n'
+
       return StreamingResponse(streaming_response(), media_type='text/event-stream')
     else:
-      return JSONResponse(content=response)
+      return JSONResponse(content=response.model_dump())
