@@ -59,6 +59,33 @@ class LlamaCpp:
   def init_engine(self):
     self.llm = Llama.from_pretrained(repo_id=bento_args.model_id, filename=bento_args.filename, **bento_args.kwargs)
 
+  @bentoml.api
+  async def generate(
+    self,
+    messages: list[Message] = pydantic.Field(
+      default=[{'role': 'user', 'content': 'Who are you? Please respond in pirate speak!'}]
+    ),
+    max_tokens: t.Annotated[int, ae.Ge(128), ae.Le(bento_args.max_tokens)] = bento_args.max_tokens,
+    temperature: float = bento_args.temperature,
+  ) -> t.AsyncGenerator[str, None]:
+    try:
+      response = self.llm.create_chat_completion_openai_v1(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        stream=stream,
+        stop=stop,
+        temperature=temperature,
+        top_p=top_p,
+        frequency_penalty=frequency_penalty,
+      )
+      for chunk in response:
+        yield chunk.choices[0].delta.content or ''
+    except Exception:
+      traceback.print_exc()
+      yield 'Internal error. Check server logs'
+      return
+
   @bentoml.api(route='/v1/chat/completions')
   async def chat_completions(
     self,
