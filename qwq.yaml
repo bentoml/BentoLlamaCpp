@@ -1,0 +1,12 @@
+args:
+  model_id: Qwen/QwQ-32B-GGUF
+  filename: *q4_k_m.gguf
+  kwargs:
+    n_threads: 32
+    n_ctx: 32768
+    seed: 1234
+  max_tokens: 16384
+  temperature: 0.6
+  name: qwq
+  cpu: 8
+  memory: '32Gi'
