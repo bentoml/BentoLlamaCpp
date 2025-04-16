@@ -70,14 +70,11 @@ class LlamaCpp:
   ) -> t.AsyncGenerator[str, None]:
     try:
       response = self.llm.create_chat_completion_openai_v1(
-        model=model,
+        model=bento_args.model_id,
         messages=messages,
         max_tokens=max_tokens,
-        stream=stream,
-        stop=stop,
+        stream=True,
         temperature=temperature,
-        top_p=top_p,
-        frequency_penalty=frequency_penalty,
       )
       for chunk in response:
         yield chunk.choices[0].delta.content or ''
