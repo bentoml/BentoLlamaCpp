@@ -70,7 +70,7 @@ class LlamaCpp:
     max_tokens: t.Annotated[int, ae.Ge(128), ae.Le(bento_args.max_tokens)] = bento_args.max_tokens,
     temperature: float = bento_args.temperature,
     stop: list[str] | None = None,
-    stream: bool = True,
+    stream: bool = False,
     top_p: float | None = 1.0,
     frequency_penalty: float | None = 0.0,
   ):
