@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os, bentoml, pydantic, json, fastapi, traceback, typing as t, annotated_types as ae
+import os, bentoml, pydantic, fastapi, traceback, typing as t, annotated_types as ae
 
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -30,7 +30,7 @@ class BentoArgs(pydantic.BaseModel):
 
 
 bento_args = bentoml.use_arguments(BentoArgs)
-openai_api_app = fastapi.FastAPI()
+openai_api_app = fastapi.FastAPI(redoc_url=False, docs_url=False)
 
 
 @openai_api_app.get('/models')
