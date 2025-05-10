@@ -92,7 +92,7 @@ class MockLlama:
                 if token: # Don't send empty string content if it's the first token in list
                     yield MockStreamingCompletionResponse(
                         model=model,
-                        choices=[MockChoiceChunk(index=0, delta=MockDelta(content=token))]
+                        choices=[MockChoiceChunk(index=0, delta=MockDelta(content=token, role="assistant"))]
                     )
 
             # Final chunk: send finish reason
@@ -102,7 +102,7 @@ class MockLlama:
             )
         else:
             # Simulate non-streaming response
-            return MockNonStreamingCompletionResponse(
+            yield from [MockNonStreamingCompletionResponse(
                 model=model,
                 choices=[
                     MockChoice(
@@ -112,7 +112,7 @@ class MockLlama:
                     )
                 ],
                 usage=MockUsage(prompt_tokens=sum(len(m.content) for m in messages), completion_tokens=15, total_tokens=sum(len(m.content) for m in messages) + 15)
-            )
+            )]
 
 class BentoArgs(pydantic.BaseModel):
   # engine args
@@ -199,4 +199,4 @@ class LlamaCpp:
 
       return StreamingResponse(streaming_response(), media_type='text/event-stream')
     else:
-      return JSONResponse(content=response.model_dump())
+      return JSONResponse(content=next(response).model_dump())
