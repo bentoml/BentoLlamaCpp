@@ -1188,7 +1188,7 @@ async def show_available_models():
     'type': 'prebuilt',
     'openai_endpoint': '/v1',
     'reasoning': bento_args.reasoning,
-    'hf_generation_config': json.dumps({'temperature': 0.8}),
+    'hf_generation_config': json.dumps({'temperature': 0.8, 'max_tokens': 2048}),
   },
   image=bentoml.images.Image(python_version='3.11', lock_python_packages=False)
   .system_packages('libopenblas-dev', 'build-essential', 'pkg-config')
