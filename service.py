@@ -1,118 +1,1157 @@
 from __future__ import annotations
 
-import os, bentoml, pydantic, fastapi, traceback, typing as t, annotated_types as ae
+import os, bentoml, pydantic, fastapi, traceback, json, typing as t, annotated_types as ae
 import time
 import uuid
 
 from starlette.responses import JSONResponse, StreamingResponse
 
-# with bentoml.importing():
-#   from llama_cpp import Llama, ChatCompletionFunction
+
+class StreamOptions(pydantic.BaseModel):
+  include_usage: bool = False
+  continuous_usage_stats: bool = False
 
 
 class Message(pydantic.BaseModel):
   role: t.Literal['system', 'user', 'assistant']
-  content: str
+  content: str | list[dict[str, t.Any]]
 
 
 # These models are to mock the behavior of llama-cpp-python's response objects
 class MockDelta(pydantic.BaseModel):
-    role: t.Optional[str] = None
-    content: t.Optional[str] = None
+  role: str | None = None
+  content: str | None = None
+  reasoning_content: str | None = None
+
 
 class MockChoiceChunk(pydantic.BaseModel):
-    index: int
-    delta: MockDelta
-    logprobs: t.Optional[t.Any] = None
-    finish_reason: t.Optional[str] = None
+  index: int
+  delta: MockDelta
+  logprobs: t.Any | None = None
+  finish_reason: str | None = None
+
 
 class MockStreamingCompletionResponse(pydantic.BaseModel):
-    id: str = pydantic.Field(default_factory=lambda: f"chatcmpl-mock-{uuid.uuid4().hex[:8]}")
-    object: str = "chat.completion.chunk"
-    created: int = pydantic.Field(default_factory=lambda: int(time.time()))
-    model: str
-    choices: list[MockChoiceChunk]
+  id: str = pydantic.Field(default_factory=lambda: f'chatcmpl-mock-{uuid.uuid4().hex[:8]}')
+  object: str = 'chat.completion.chunk'
+  created: int = pydantic.Field(default_factory=lambda: int(time.time()))
+  model: str
+  choices: list[MockChoiceChunk]
+  usage: MockUsage | None = None
+
 
 class MockMessageResponse(pydantic.BaseModel):
-    role: str
-    content: str
+  role: str
+  content: str
+  reasoning_content: str | None = None
+
 
 class MockChoice(pydantic.BaseModel):
-    index: int
-    message: MockMessageResponse
-    logprobs: t.Optional[t.Any] = None
-    finish_reason: t.Optional[str] = None
+  index: int
+  message: MockMessageResponse
+  logprobs: t.Any | None = None
+  finish_reason: str | None = None
+
 
 class MockUsage(pydantic.BaseModel):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+  prompt_tokens: int
+  completion_tokens: int
+  total_tokens: int
+
 
 class MockNonStreamingCompletionResponse(pydantic.BaseModel):
-    id: str = pydantic.Field(default_factory=lambda: f"chatcmpl-mock-{uuid.uuid4().hex[:8]}")
-    object: str = "chat.completion"
-    created: int = pydantic.Field(default_factory=lambda: int(time.time()))
-    model: str
-    choices: list[MockChoice]
-    usage: MockUsage
+  id: str = pydantic.Field(default_factory=lambda: f'chatcmpl-mock-{uuid.uuid4().hex[:8]}')
+  object: str = 'chat.completion'
+  created: int = pydantic.Field(default_factory=lambda: int(time.time()))
+  model: str
+  choices: list[MockChoice]
+  usage: MockUsage
 
-class MockLlama:
-    def __init__(self, model_id: str):
-        self.model_id = model_id
-        print(f"Initialized MockLlama with model_id: {self.model_id}")
 
-    def create_chat_completion_openai_v1(
-        self,
-        model: str,
-        messages: list[Message],
-        max_tokens: int,
-        stream: bool,
-        stop: t.Optional[list[str]] = None,
-        temperature: float = 0.7,
-        top_p: t.Optional[float] = 1.0,
-        frequency_penalty: t.Optional[float] = 0.0,
-        # presence_penalty: t.Optional[float] = 0.0, # common OpenAI param
-        # user: t.Optional[str] = None, # common OpenAI param
-    ):
-        print(f"MockLlama.create_chat_completion_openai_v1 called with model: {model}, stream: {stream}")
-        # Use the 'model' argument passed to this method, which originates from the request or bento_args.model_id
+class MockLlama(pydantic.BaseModel):
+  model_id: str
 
-        if stream:
-            # Simulate streaming response token by token
-            response_tokens = ['', 'Ah', 'oy', '!', ' This', ' be', ' a', ' mock', ' non', '-stream', 'ing', ' response', ',', ' savvy', '?']
+  def create_chat_completion_openai_v1(
+    self,
+    model: str,
+    messages: list[Message],
+    stream: bool,
+    max_tokens: int = 128,
+    temperature: float = 0.7,
+    stop: list[str] | None = None,
+    top_p: float | None = 1.0,
+    frequency_penalty: float | None = 0.0,
+    reasoning: int = 0,
+    stream_options: StreamOptions | None = None,
+  ):
+    print(
+      f'MockLlama.create_chat_completion_openai_v1 called with model: {model}, stream: {stream}, reasoning: {reasoning}'
+    )
 
-            # First chunk: send the role
-            yield MockStreamingCompletionResponse(
-                model=model,
-                choices=[MockChoiceChunk(index=0, delta=MockDelta(role="assistant"))]
+    mock_response_text = """
+Albert Camus' concept of absurdism is a fascinating and influential philosophical idea. While I can provide counterarguments, it's essential to acknowledge that Camus' views on absurdism are deeply rooted in his existentialist and phenomenological perspectives. That being said, here are some potential arguments against the notion that life is inherently absurd:
+
+## **Argument 1: Human experience and meaning-making**
+
+Camus argues that the human desire for meaning and purpose in life is at odds with the apparent indifference of the universe. However, one could counter that human experience and consciousness are capable of creating meaning and purpose, even in the face of an seemingly indifferent universe. Our ability to perceive, reflect, and create allows us to impose meaning on our existence, making life less absurd and more meaningful.
+
+## **Argument 2: The presence of patterns and order**
+
+Camus' absurdism relies on the idea that the universe is inherently chaotic and devoid of inherent meaning. However, the presence of patterns, laws, and order in the natural world suggests that there may be an underlying structure or logic to the universe. The laws of physics, the cycles of nature, and the emergence of complex systems all point to a degree of order and coherence in the universe. This order can be seen as a foundation for meaning and purpose, rather than absurdity.
+
+## **Argument 3: The role of human relationships and community**
+
+Camus' absurdism often focuses on the individual's experience of alienation and disconnection from the world. However, human relationships and community can provide a sense of belonging, purpose, and meaning that transcends individual absurdity. Our connections with others, our shared experiences, and our collective pursuits can create a sense of meaning and significance that is not reducible to individual absurdity.
+
+## **Argument 4: The possibility of objective moral values**
+
+Camus' absurdism implies that moral values are subjective and arbitrary, as there is no inherent meaning or purpose in the universe. However, some philosophers argue that objective moral values can be derived from human nature, reason, or other sources. If objective moral values exist, they could provide a foundation for meaning and purpose that is not dependent on individual perspectives or cultural norms.
+
+## **Argument 5: The concept of telos**
+
+In ancient Greek philosophy, the concept of telos refers to the inherent purpose or direction of something. While Camus' absurdism rejects the idea of an inherent telos in human existence, some philosophers argue that human beings have a natural telos, such as the pursuit of happiness, the cultivation of virtues, or the realization of human potential. If human beings have a natural telos, it could provide a sense of direction and purpose that is not absurd.
+
+## **Argument 6: The importance of narrative and storytelling**
+
+Camus' absurdism often emphasizes the fragmented and disjointed nature of human experience. However, narrative and storytelling can provide a way to impose meaning and coherence on our experiences, creating a sense of continuity and purpose. By telling stories about ourselves, our relationships, and our place in the world, we can create a sense of meaning and significance that transcends absurdity.
+
+While these arguments do not necessarily refute Camus' absurdism entirely, they offer alternative perspectives that challenge the idea that life is inherently absurd. Ultimately, the question of whether life is absurd or not may depend on one's individual experiences, values, and beliefs.
+
+What are your thoughts on Camus' absurdism? Do you find these counterarguments persuasive, or do you think they miss the point of Camus' philosophy?
+"""
+
+    mock_reasoning_text = """Okay, the user is asking for the current temperature in San Francisco and also the temperature for tomorrow. Let me see which functions I can use here.
+
+First, the current temperature. The get_current_temperature function seems appropriate. The parameters needed are location and unit. The user didn't specify the unit, so I'll default to celsius. The location is San Francisco, so I'll format that as "San Francisco, CA, US".
+
+Next, for tomorrow's temperature, I need to use the get_temperature_date function. This requires location, date, and unit. The date should be tomorrow's date. Since the current date is 2024-09-30, tomorrow is 2024-10-01. Again, location is "San Francisco, CA, US" and unit defaults to celsius.
+
+I need to make two separate function calls here. First for the current temperature, then for tomorrow's. Let me structure the tool calls accordingly."""
+
+    response_tokens = [
+      '',
+      '\n',
+      'Albert',
+      ' Cam',
+      'us',
+      "'",
+      ' concept',
+      ' of',
+      ' absurd',
+      'ism',
+      ' is',
+      ' a',
+      ' fascinating',
+      ' and',
+      ' influential',
+      ' philosophical',
+      ' idea',
+      '.',
+      ' While',
+      ' I',
+      ' can',
+      ' provide',
+      ' counter',
+      'arguments',
+      ',',
+      ' it',
+      "'s",
+      ' essential',
+      ' to',
+      ' acknowledge',
+      ' that',
+      ' Cam',
+      'us',
+      "'",
+      ' views',
+      ' on',
+      ' absurd',
+      'ism',
+      ' are',
+      ' deeply',
+      ' rooted',
+      ' in',
+      ' his',
+      ' existential',
+      'ist',
+      ' and',
+      ' phenomen',
+      'ological',
+      ' perspectives',
+      '.',
+      ' That',
+      ' being',
+      ' said',
+      ',',
+      ' here',
+      ' are',
+      ' some',
+      ' potential',
+      ' arguments',
+      ' against',
+      ' the',
+      ' notion',
+      ' that',
+      ' life',
+      ' is',
+      ' inherently',
+      ' absurd',
+      ':\n\n',
+      '## ', '**',
+      'Argument',
+      ' ',
+      '1',
+      ':',
+      ' Human',
+      ' experience',
+      ' and',
+      ' meaning',
+      '-making',
+      '**\n\n',
+      'Cam',
+      'us',
+      ' argues',
+      ' that',
+      ' the',
+      ' human',
+      ' desire',
+      ' for',
+      ' meaning',
+      ' and',
+      ' purpose',
+      ' in',
+      ' life',
+      ' is',
+      ' at',
+      ' odds',
+      ' with',
+      ' the',
+      ' apparent',
+      ' indifference',
+      ' of',
+      ' the',
+      ' universe',
+      '.',
+      ' However',
+      ',',
+      ' one',
+      ' could',
+      ' counter',
+      ' that',
+      ' human',
+      ' experience',
+      ' and',
+      ' consciousness',
+      ' are',
+      ' capable',
+      ' of',
+      ' creating',
+      ' meaning',
+      ' and',
+      ' purpose',
+      ',',
+      ' even',
+      ' in',
+      ' the',
+      ' face',
+      ' of',
+      ' an',
+      ' seemingly',
+      ' indifferent',
+      ' universe',
+      '.',
+      ' Our',
+      ' ability',
+      ' to',
+      ' perceive',
+      ',',
+      ' reflect',
+      ',',
+      ' and',
+      ' create',
+      ' allows',
+      ' us',
+      ' to',
+      ' impose',
+      ' meaning',
+      ' on',
+      ' our',
+      ' existence',
+      ',',
+      ' making',
+      ' life',
+      ' less',
+      ' absurd',
+      ' and',
+      ' more',
+      ' meaningful',
+      '.\n\n',
+      '## ', '**',
+      'Argument',
+      ' ',
+      '2',
+      ':',
+      ' The',
+      ' presence',
+      ' of',
+      ' patterns',
+      ' and',
+      ' order',
+      '**\n\n',
+      'Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      ' relies',
+      ' on',
+      ' the',
+      ' idea',
+      ' that',
+      ' the',
+      ' universe',
+      ' is',
+      ' inherently',
+      ' chaotic',
+      ' and',
+      ' devoid',
+      ' of',
+      ' inherent',
+      ' meaning',
+      '.',
+      ' However',
+      ',',
+      ' the',
+      ' presence',
+      ' of',
+      ' patterns',
+      ',',
+      ' laws',
+      ',',
+      ' and',
+      ' order',
+      ' in',
+      ' the',
+      ' natural',
+      ' world',
+      ' suggests',
+      ' that',
+      ' there',
+      ' may',
+      ' be',
+      ' an',
+      ' underlying',
+      ' structure',
+      ' or',
+      ' logic',
+      ' to',
+      ' the',
+      ' universe',
+      '.',
+      ' The',
+      ' laws',
+      ' of',
+      ' physics',
+      ',',
+      ' the',
+      ' cycles',
+      ' of',
+      ' nature',
+      ',',
+      ' and',
+      ' the',
+      ' emergence',
+      ' of',
+      ' complex',
+      ' systems',
+      ' all',
+      ' point',
+      ' to',
+      ' a',
+      ' degree',
+      ' of',
+      ' order',
+      ' and',
+      ' coherence',
+      ' in',
+      ' the',
+      ' universe',
+      '.',
+      ' This',
+      ' order',
+      ' can',
+      ' be',
+      ' seen',
+      ' as',
+      ' a',
+      ' foundation',
+      ' for',
+      ' meaning',
+      ' and',
+      ' purpose',
+      ',',
+      ' rather',
+      ' than',
+      ' absurd',
+      'ity',
+      '.\n\n',
+      '## ', '**',
+      'Argument',
+      ' ',
+      '3',
+      ':',
+      ' The',
+      ' role',
+      ' of',
+      ' human',
+      ' relationships',
+      ' and',
+      ' community',
+      '**\n\n',
+      'Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      ' often',
+      ' focuses',
+      ' on',
+      ' the',
+      ' individual',
+      "'s",
+      ' experience',
+      ' of',
+      ' alien',
+      'ation',
+      ' and',
+      ' dis',
+      'connection',
+      ' from',
+      ' the',
+      ' world',
+      '.',
+      ' However',
+      ',',
+      ' human',
+      ' relationships',
+      ' and',
+      ' community',
+      ' can',
+      ' provide',
+      ' a',
+      ' sense',
+      ' of',
+      ' belonging',
+      ',',
+      ' purpose',
+      ',',
+      ' and',
+      ' meaning',
+      ' that',
+      ' transc',
+      'ends',
+      ' individual',
+      ' absurd',
+      'ity',
+      '.',
+      ' Our',
+      ' connections',
+      ' with',
+      ' others',
+      ',',
+      ' our',
+      ' shared',
+      ' experiences',
+      ',',
+      ' and',
+      ' our',
+      ' collective',
+      ' pursuits',
+      ' can',
+      ' create',
+      ' a',
+      ' sense',
+      ' of',
+      ' meaning',
+      ' and',
+      ' significance',
+      ' that',
+      ' is',
+      ' not',
+      ' redu',
+      'c',
+      'ible',
+      ' to',
+      ' individual',
+      ' absurd',
+      'ity',
+      '.\n\n',
+      '## ', '**',
+      'Argument',
+      ' ',
+      '4',
+      ':',
+      ' The',
+      ' possibility',
+      ' of',
+      ' objective',
+      ' moral',
+      ' values',
+      '**\n\n',
+      'Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      ' implies',
+      ' that',
+      ' moral',
+      ' values',
+      ' are',
+      ' subjective',
+      ' and',
+      ' arbitrary',
+      ',',
+      ' as',
+      ' there',
+      ' is',
+      ' no',
+      ' inherent',
+      ' meaning',
+      ' or',
+      ' purpose',
+      ' in',
+      ' the',
+      ' universe',
+      '.',
+      ' However',
+      ',',
+      ' some',
+      ' philosophers',
+      ' argue',
+      ' that',
+      ' objective',
+      ' moral',
+      ' values',
+      ' can',
+      ' be',
+      ' derived',
+      ' from',
+      ' human',
+      ' nature',
+      ',',
+      ' reason',
+      ',',
+      ' or',
+      ' other',
+      ' sources',
+      '.',
+      ' If',
+      ' objective',
+      ' moral',
+      ' values',
+      ' exist',
+      ',',
+      ' they',
+      ' could',
+      ' provide',
+      ' a',
+      ' foundation',
+      ' for',
+      ' meaning',
+      ' and',
+      ' purpose',
+      ' that',
+      ' is',
+      ' not',
+      ' dependent',
+      ' on',
+      ' individual',
+      ' perspectives',
+      ' or',
+      ' cultural',
+      ' norms',
+      '.\n\n',
+      '## ', '**',
+      'Argument',
+      ' ',
+      '5',
+      ':',
+      ' The',
+      ' concept',
+      ' of',
+      ' tel',
+      'os',
+      '**\n\n',
+      'In',
+      ' ancient',
+      ' Greek',
+      ' philosophy',
+      ',',
+      ' the',
+      ' concept',
+      ' of',
+      ' tel',
+      'os',
+      ' refers',
+      ' to',
+      ' the',
+      ' inherent',
+      ' purpose',
+      ' or',
+      ' direction',
+      ' of',
+      ' something',
+      '.',
+      ' While',
+      ' Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      ' rejects',
+      ' the',
+      ' idea',
+      ' of',
+      ' an',
+      ' inherent',
+      ' tel',
+      'os',
+      ' in',
+      ' human',
+      ' existence',
+      ',',
+      ' some',
+      ' philosophers',
+      ' argue',
+      ' that',
+      ' human',
+      ' beings',
+      ' have',
+      ' a',
+      ' natural',
+      ' tel',
+      'os',
+      ',',
+      ' such',
+      ' as',
+      ' the',
+      ' pursuit',
+      ' of',
+      ' happiness',
+      ',',
+      ' the',
+      ' cultivation',
+      ' of',
+      ' virtues',
+      ',',
+      ' or',
+      ' the',
+      ' realization',
+      ' of',
+      ' human',
+      ' potential',
+      '.',
+      ' If',
+      ' human',
+      ' beings',
+      ' have',
+      ' a',
+      ' natural',
+      ' tel',
+      'os',
+      ',',
+      ' it',
+      ' could',
+      ' provide',
+      ' a',
+      ' sense',
+      ' of',
+      ' direction',
+      ' and',
+      ' purpose',
+      ' that',
+      ' is',
+      ' not',
+      ' absurd',
+      '.\n\n',
+      '## ', '**',
+      'Argument',
+      ' ',
+      '6',
+      ':',
+      ' The',
+      ' importance',
+      ' of',
+      ' narrative',
+      ' and',
+      ' storytelling',
+      '**\n\n',
+      'Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      ' often',
+      ' emphasizes',
+      ' the',
+      ' fragmented',
+      ' and',
+      ' disjoint',
+      'ed',
+      ' nature',
+      ' of',
+      ' human',
+      ' experience',
+      '.',
+      ' However',
+      ',',
+      ' narrative',
+      ' and',
+      ' storytelling',
+      ' can',
+      ' provide',
+      ' a',
+      ' way',
+      ' to',
+      ' impose',
+      ' meaning',
+      ' and',
+      ' coherence',
+      ' on',
+      ' our',
+      ' experiences',
+      ',',
+      ' creating',
+      ' a',
+      ' sense',
+      ' of',
+      ' continuity',
+      ' and',
+      ' purpose',
+      '.',
+      ' By',
+      ' telling',
+      ' stories',
+      ' about',
+      ' ourselves',
+      ',',
+      ' our',
+      ' relationships',
+      ',',
+      ' and',
+      ' our',
+      ' place',
+      ' in',
+      ' the',
+      ' world',
+      ',',
+      ' we',
+      ' can',
+      ' create',
+      ' a',
+      ' sense',
+      ' of',
+      ' meaning',
+      ' and',
+      ' significance',
+      ' that',
+      ' transc',
+      'ends',
+      ' absurd',
+      'ity',
+      '.\n\n',
+      'While',
+      ' these',
+      ' arguments',
+      ' do',
+      ' not',
+      ' necessarily',
+      ' refute',
+      ' Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      ' entirely',
+      ',',
+      ' they',
+      ' offer',
+      ' alternative',
+      ' perspectives',
+      ' that',
+      ' challenge',
+      ' the',
+      ' idea',
+      ' that',
+      ' life',
+      ' is',
+      ' inherently',
+      ' absurd',
+      '.',
+      ' Ultimately',
+      ',',
+      ' the',
+      ' question',
+      ' of',
+      ' whether',
+      ' life',
+      ' is',
+      ' absurd',
+      ' or',
+      ' not',
+      ' may',
+      ' depend',
+      ' on',
+      ' one',
+      "'s",
+      ' individual',
+      ' experiences',
+      ',',
+      ' values',
+      ',',
+      ' and',
+      ' beliefs',
+      '.\n\n',
+      'What',
+      ' are',
+      ' your',
+      ' thoughts',
+      ' on',
+      ' Cam',
+      'us',
+      "'",
+      ' absurd',
+      'ism',
+      '?',
+      ' Do',
+      ' you',
+      ' find',
+      ' these',
+      ' counter',
+      'arguments',
+      ' persuasive',
+      ',',
+      ' or',
+      ' do',
+      ' you',
+      ' think',
+      ' they',
+      ' miss',
+      ' the',
+      ' point',
+      ' of',
+      ' Cam',
+      'us',
+      "'",
+      ' philosophy',
+      '?\n',
+    ]
+    reasoning_tokens = [
+      'Okay',
+      ',',
+      ' the',
+      ' user',
+      ' is',
+      ' asking',
+      ' for',
+      ' the',
+      ' current',
+      ' temperature',
+      ' in',
+      ' San',
+      ' Francisco',
+      ' and',
+      ' also',
+      ' the',
+      ' temperature',
+      ' for',
+      ' tomorrow',
+      '.',
+      ' Let',
+      ' me',
+      ' see',
+      ' which',
+      ' functions',
+      ' I',
+      ' can',
+      ' use',
+      ' here',
+      '.\n\n',
+      'First',
+      ',',
+      ' the',
+      ' current',
+      ' temperature',
+      '.',
+      ' The',
+      ' get',
+      '_current',
+      '_temperature',
+      ' function',
+      ' seems',
+      ' appropriate',
+      '.',
+      ' The',
+      ' parameters',
+      ' needed',
+      ' are',
+      ' location',
+      ' and',
+      ' unit',
+      '.',
+      ' The',
+      ' user',
+      ' didn',
+      "'t",
+      ' specify',
+      ' the',
+      ' unit',
+      ',',
+      ' so',
+      ' I',
+      "'ll",
+      ' default',
+      ' to',
+      ' c',
+      'elsius',
+      '.',
+      ' The',
+      ' location',
+      ' is',
+      ' San',
+      ' Francisco',
+      ',',
+      ' so',
+      ' I',
+      "'ll",
+      ' format',
+      ' that',
+      ' as',
+      ' "',
+      'San',
+      ' Francisco',
+      ',',
+      ' CA',
+      ',',
+      ' US',
+      '".\n\n',
+      'Next',
+      ',',
+      ' for',
+      ' tomorrow',
+      "'s",
+      ' temperature',
+      ',',
+      ' I',
+      ' need',
+      ' to',
+      ' use',
+      ' the',
+      ' get',
+      '_temperature',
+      '_date',
+      ' function',
+      '.',
+      ' This',
+      ' requires',
+      ' location',
+      ',',
+      ' date',
+      ',',
+      ' and',
+      ' unit',
+      '.',
+      ' The',
+      ' date',
+      ' should',
+      ' be',
+      ' tomorrow',
+      "'s",
+      ' date',
+      '.',
+      ' Since',
+      ' the',
+      ' current',
+      ' date',
+      ' is',
+      ' ',
+      '2',
+      '0',
+      '2',
+      '4',
+      '-',
+      '0',
+      '9',
+      '-',
+      '3',
+      '0',
+      ',',
+      ' tomorrow',
+      ' is',
+      ' ',
+      '2',
+      '0',
+      '2',
+      '4',
+      '-',
+      '1',
+      '0',
+      '-',
+      '0',
+      '1',
+      '.',
+      ' Again',
+      ',',
+      ' location',
+      ' is',
+      ' "',
+      'San',
+      ' Francisco',
+      ',',
+      ' CA',
+      ',',
+      ' US',
+      '"',
+      ' and',
+      ' unit',
+      ' defaults',
+      ' to',
+      ' c',
+      'elsius',
+      '.\n\n',
+      'I',
+      ' need',
+      ' to',
+      ' make',
+      ' two',
+      ' separate',
+      ' function',
+      ' calls',
+      ' here',
+      '.',
+      ' First',
+      ' for',
+      ' the',
+      ' current',
+      ' temperature',
+      ',',
+      ' then',
+      ' for',
+      ' tomorrow',
+      "'s",
+      '.',
+      ' Let',
+      ' me',
+      ' structure',
+      ' the',
+      ' tool',
+      ' calls',
+      ' accordingly',
+      '.',
+    ]
+    include_usage = bool(stream_options and stream_options.include_usage)
+    continuous_usage = bool(stream_options and stream_options.continuous_usage_stats)
+
+    prompt_tokens = sum(len(str(m.content)) for m in messages)
+    completion_tokens_so_far = 0
+
+    if stream:
+      initial_usage = None
+      if continuous_usage:
+        initial_usage = MockUsage(
+          prompt_tokens=prompt_tokens,
+          completion_tokens=completion_tokens_so_far,
+          total_tokens=prompt_tokens + completion_tokens_so_far,
+        )
+
+      yield MockStreamingCompletionResponse(
+        model=model,
+        choices=[MockChoiceChunk(index=0, delta=MockDelta(role='assistant'))],
+        usage=initial_usage,
+      )
+
+      if reasoning == 1:
+        for token in reasoning_tokens:
+          completion_tokens_so_far += 1
+          usage_block = None
+          if continuous_usage:
+            usage_block = MockUsage(
+              prompt_tokens=prompt_tokens,
+              completion_tokens=completion_tokens_so_far,
+              total_tokens=prompt_tokens + completion_tokens_so_far,
             )
 
-            # Subsequent chunks: send content tokens
-            for token in response_tokens:
-                if token: # Don't send empty string content if it's the first token in list
-                    yield MockStreamingCompletionResponse(
-                        model=model,
-                        choices=[MockChoiceChunk(index=0, delta=MockDelta(content=token, role="assistant"))]
-                    )
+          yield MockStreamingCompletionResponse(
+            model=model,
+            choices=[MockChoiceChunk(index=0, delta=MockDelta(reasoning_content=token))],
+            usage=usage_block,
+          )
 
-            # Final chunk: send finish reason
-            yield MockStreamingCompletionResponse(
-                model=model,
-                choices=[MockChoiceChunk(index=0, delta=MockDelta(), finish_reason="stop")],
+      for token in response_tokens:
+        if token:
+          completion_tokens_so_far += 1
+          usage_block = None
+          if continuous_usage:
+            usage_block = MockUsage(
+              prompt_tokens=prompt_tokens,
+              completion_tokens=completion_tokens_so_far,
+              total_tokens=prompt_tokens + completion_tokens_so_far,
             )
-        else:
-            # Simulate non-streaming response
-            yield from [MockNonStreamingCompletionResponse(
-                model=model,
-                choices=[
-                    MockChoice(
-                        index=0,
-                        message=MockMessageResponse(role="assistant", content="Ahoy! This be a mock non-streaming response, savvy?"),
-                        finish_reason="stop"
-                    )
-                ],
-                usage=MockUsage(prompt_tokens=sum(len(m.content) for m in messages), completion_tokens=15, total_tokens=sum(len(m.content) for m in messages) + 15)
-            )]
+
+          yield MockStreamingCompletionResponse(
+            model=model,
+            choices=[MockChoiceChunk(index=0, delta=MockDelta(content=token, role='assistant'))],
+            usage=usage_block,
+          )
+
+      final_usage_block = None
+      if continuous_usage:
+        final_usage_block = MockUsage(
+          prompt_tokens=prompt_tokens,
+          completion_tokens=completion_tokens_so_far,
+          total_tokens=prompt_tokens + completion_tokens_so_far,
+        )
+
+      yield MockStreamingCompletionResponse(
+        model=model,
+        choices=[MockChoiceChunk(index=0, delta=MockDelta(), finish_reason='stop')],
+        usage=final_usage_block,
+      )
+
+      if include_usage:
+        yield MockStreamingCompletionResponse(
+          model=model,
+          choices=[],
+          usage=MockUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens_so_far,
+            total_tokens=prompt_tokens + completion_tokens_so_far,
+          ),
+        )
+    else:
+      yield from [
+        MockNonStreamingCompletionResponse(
+          model=model,
+          choices=[
+            MockChoice(
+              index=0,
+              message=MockMessageResponse(
+                role='assistant', reasoning_content=mock_reasoning_text, content=mock_response_text
+              ),
+              finish_reason='stop',
+            )
+          ],
+          usage=MockUsage(
+            prompt_tokens=sum(len(m.content) for m in messages),
+            completion_tokens=len(response_tokens),
+            total_tokens=sum(len(m.content) for m in messages)
+            + len(response_tokens)
+            + (len(reasoning_tokens) if reasoning else 0),
+          ),
+        )
+      ]
+
 
 class BentoArgs(pydantic.BaseModel):
   # engine args
@@ -123,6 +1162,7 @@ class BentoArgs(pydantic.BaseModel):
   # inference args
   max_tokens: int = pydantic.Field(default_factory=lambda: int(os.environ.get('MAX_TOKENS', 2048)))
   temperature: float = pydantic.Field(default=0.6)
+  reasoning: int = pydantic.Field(default=0)
 
   # service args
   name: str = 'gemma3'
@@ -143,7 +1183,13 @@ async def show_available_models():
 @bentoml.service(
   name=f'bentollamacpp-{bento_args.name}-instruct-service',
   resources={'cpu': bento_args.cpu, 'memory': bento_args.memory},
-  labels={'owner': 'bentoml-team', 'type': 'prebuilt'},
+  labels={
+    'owner': 'bentoml-team',
+    'type': 'prebuilt',
+    'openai_endpoint': '/v1',
+    'reasoning': bento_args.reasoning,
+    'hf_generation_config': json.dumps({'temperature': 0.8}),
+  },
   image=bentoml.images.Image(python_version='3.11', lock_python_packages=False)
   .system_packages('libopenblas-dev', 'build-essential', 'pkg-config')
   .pyproject_toml('pyproject.toml'),
@@ -156,14 +1202,13 @@ async def show_available_models():
 class LlamaCpp:
   @bentoml.on_startup
   def init_engine(self):
-    # self.llm = Llama.from_pretrained(repo_id=bento_args.model_id, filename=bento_args.filename, **bento_args.kwargs)
     self.llm = MockLlama(model_id=bento_args.model_id)
 
   @bentoml.api(route='/v1/chat/completions')
   async def chat_completions(
     self,
     messages: list[Message] = pydantic.Field(
-      default=[Message(role='user', content='Who are you? Please respond in pirate speak!')]
+      default_factory=lambda: [Message(role='user', content='Who are you? Please respond in pirate speak!')]
     ),
     functions: list[t.Any] | None = None,
     model: str = bento_args.model_id,
@@ -173,6 +1218,8 @@ class LlamaCpp:
     stream: bool = False,
     top_p: float | None = 1.0,
     frequency_penalty: float | None = 0.0,
+    reasoning: int = bento_args.reasoning,
+    stream_options: StreamOptions | None = None,
   ):
     response = self.llm.create_chat_completion_openai_v1(
       model=model,
@@ -183,6 +1230,8 @@ class LlamaCpp:
       temperature=temperature,
       top_p=top_p,
       frequency_penalty=frequency_penalty,
+      reasoning=reasoning,
+      stream_options=stream_options,
     )
     if stream:
 
